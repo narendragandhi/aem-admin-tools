@@ -1,0 +1,24 @@
+# Java
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.log
+.idea/
+*.iml
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# IDE
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Environment
+.env
+.env.local
