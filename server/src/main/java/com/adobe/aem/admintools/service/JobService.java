@@ -1,5 +1,6 @@
 package com.adobe.aem.admintools.service;
 
+import com.adobe.aem.admintools.agui.AgUIEvent;
 import com.adobe.aem.admintools.model.Job;
 import com.adobe.aem.admintools.model.JobLogEntry;
 import com.adobe.aem.admintools.model.JobStatus;
@@ -13,6 +14,7 @@ import reactor.core.publisher.Sinks;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -26,6 +28,7 @@ public class JobService {
     private final ToolRegistry toolRegistry;
     private final Map<String, Job> jobs = new ConcurrentHashMap<>();
     private final Map<String, Sinks.Many<Job>> jobSinks = new ConcurrentHashMap<>();
+    private final Map<String, Sinks.Many<AgUIEvent>> agUISinks = new ConcurrentHashMap<>();
 
     public Job createJob(String toolId, Map<String, Object> parameters) {
         AdminTool tool = toolRegistry.getTool(toolId)
@@ -41,6 +44,9 @@ public class JobService {
 
         Sinks.Many<Job> sink = Sinks.many().multicast().onBackpressureBuffer();
         jobSinks.put(job.getId(), sink);
+
+        Sinks.Many<AgUIEvent> agUISink = Sinks.many().multicast().onBackpressureBuffer();
+        agUISinks.put(job.getId(), agUISink);
 
         return job;
     }
@@ -60,24 +66,36 @@ public class JobService {
         job.setStartedAt(Instant.now());
         job.addLog(JobLogEntry.Level.INFO, "Job started");
         emitUpdate(job);
+        emitAgUIEvent(jobId, AgUIEvent.runStarted(jobId));
+        emitAgUIEvent(jobId, AgUIEvent.toolCallStart(jobId, job.getToolId(), job.getToolName()));
 
         try {
             // Pass emitUpdate as callback to the tool
-            tool.execute(job, this::emitUpdate);
+            tool.execute(job, this::emitUpdateWithAgUI);
 
             job.setStatus(JobStatus.COMPLETED);
             job.addLog(JobLogEntry.Level.INFO,
                     String.format("Job completed. Success: %d, Errors: %d, Skipped: %d",
                             job.getSuccessCount(), job.getErrorCount(), job.getSkippedCount()));
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("totalItems", job.getTotalItems());
+            result.put("successCount", job.getSuccessCount());
+            result.put("errorCount", job.getErrorCount());
+            result.put("skippedCount", job.getSkippedCount());
+            emitAgUIEvent(jobId, AgUIEvent.toolCallEnd(jobId, job.getToolId(), result));
+            emitAgUIEvent(jobId, AgUIEvent.runFinished(jobId, result));
         } catch (Exception e) {
             log.error("Job failed: {}", jobId, e);
             job.setStatus(JobStatus.FAILED);
             job.setErrorMessage(e.getMessage());
             job.addLog(JobLogEntry.Level.ERROR, "Job failed: " + e.getMessage());
+            emitAgUIEvent(jobId, AgUIEvent.runError(jobId, e.getMessage()));
         } finally {
             job.setCompletedAt(Instant.now());
             emitUpdate(job);
             completeJobStream(jobId);
+            completeAgUIStream(jobId);
         }
     }
 
@@ -132,6 +150,46 @@ public class JobService {
 
     private void completeJobStream(String jobId) {
         Sinks.Many<Job> sink = jobSinks.get(jobId);
+        if (sink != null) {
+            sink.tryEmitComplete();
+        }
+    }
+
+    // AG-UI Protocol Support
+
+    public Flux<AgUIEvent> streamAgUIEvents(String jobId) {
+        Sinks.Many<AgUIEvent> sink = agUISinks.get(jobId);
+        if (sink == null) {
+            return Flux.empty();
+        }
+
+        return sink.asFlux().timeout(Duration.ofMinutes(30));
+    }
+
+    private void emitUpdateWithAgUI(Job job) {
+        emitUpdate(job);
+
+        // Emit STATE_DELTA for progress updates
+        Map<String, Object> state = new HashMap<>();
+        state.put("status", job.getStatus().name());
+        state.put("processedItems", job.getProcessedItems());
+        state.put("totalItems", job.getTotalItems());
+        state.put("successCount", job.getSuccessCount());
+        state.put("errorCount", job.getErrorCount());
+        state.put("progressPercent", job.getProgressPercent());
+
+        emitAgUIEvent(job.getId(), AgUIEvent.stateDelta(job.getId(), state));
+    }
+
+    private void emitAgUIEvent(String jobId, AgUIEvent event) {
+        Sinks.Many<AgUIEvent> sink = agUISinks.get(jobId);
+        if (sink != null) {
+            sink.tryEmitNext(event);
+        }
+    }
+
+    private void completeAgUIStream(String jobId) {
+        Sinks.Many<AgUIEvent> sink = agUISinks.get(jobId);
         if (sink != null) {
             sink.tryEmitComplete();
         }

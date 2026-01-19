@@ -1,5 +1,6 @@
 package com.adobe.aem.admintools.controller;
 
+import com.adobe.aem.admintools.agui.AgUIEvent;
 import com.adobe.aem.admintools.model.Job;
 import com.adobe.aem.admintools.service.JobService;
 import lombok.RequiredArgsConstructor;
@@ -46,6 +47,11 @@ public class JobController {
     @GetMapping(value = "/{id}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<Job> streamJob(@PathVariable String id) {
         return jobService.streamJobUpdates(id);
+    }
+
+    @GetMapping(value = "/{id}/agui-stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<AgUIEvent> streamAgUIEvents(@PathVariable String id) {
+        return jobService.streamAgUIEvents(id);
     }
 
     public record CreateJobRequest(String toolId, Map<String, Object> parameters) {}
