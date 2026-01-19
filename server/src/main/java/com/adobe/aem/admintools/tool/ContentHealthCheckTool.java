@@ -1,28 +1,22 @@
 package com.adobe.aem.admintools.tool;
 
-import com.adobe.aem.admintools.config.AemConfig;
 import com.adobe.aem.admintools.model.*;
+import com.adobe.aem.admintools.service.AemClientService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.function.Consumer;
 
-/**
- * Content Health Check Tool - Scans content paths for common issues:
- * - Missing required properties
- * - Broken references
- * - Stale content (not modified recently)
- * - Missing alt text on images
- * - etc.
- */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class ContentHealthCheckTool implements AdminTool {
 
-    private final AemConfig aemConfig;
+    private final AemClientService aemClient;
 
     @Override
     public ToolDefinition getDefinition() {
@@ -33,7 +27,7 @@ public class ContentHealthCheckTool implements AdminTool {
                 .category("Content")
                 .icon("health")
                 .destructive(false)
-                .requiresAem(false)
+                .requiresAem(true)
                 .parameters(List.of(
                         ToolParameter.builder()
                                 .name("rootPath")
@@ -68,12 +62,12 @@ public class ContentHealthCheckTool implements AdminTool {
                                 .defaultValue(90)
                                 .build(),
                         ToolParameter.builder()
-                                .name("dryRun")
-                                .label("Dry Run")
-                                .description("Only report issues, don't fix anything")
-                                .type(ToolParameter.ParameterType.BOOLEAN)
+                                .name("maxPages")
+                                .label("Max Pages to Scan")
+                                .description("Maximum number of pages to scan")
+                                .type(ToolParameter.ParameterType.NUMBER)
                                 .required(false)
-                                .defaultValue(true)
+                                .defaultValue(100)
                                 .build()
                 ))
                 .build();
@@ -99,70 +93,56 @@ public class ContentHealthCheckTool implements AdminTool {
         List<String> checks = (List<String>) params.getOrDefault("checks",
                 List.of("missing-title", "missing-description", "broken-references"));
         int staleDays = ((Number) params.getOrDefault("staleDays", 90)).intValue();
+        int maxPages = ((Number) params.getOrDefault("maxPages", 100)).intValue();
 
         job.addLog(JobLogEntry.Level.INFO, "Starting content health check on: " + rootPath);
         job.addLog(JobLogEntry.Level.INFO, "Running checks: " + String.join(", ", checks));
 
-        List<SimulatedPage> pages = generateSimulatedContent(rootPath);
-        job.setTotalItems(pages.size());
-        progressCallback.accept(job);
+        if (!aemClient.isEnabled()) {
+            job.addLog(JobLogEntry.Level.ERROR, "AEM connection is not enabled. Please configure AEM credentials.");
+            return;
+        }
 
-        for (SimulatedPage page : pages) {
-            if (job.getStatus() == JobStatus.CANCELLED) {
-                job.addLog(JobLogEntry.Level.WARN, "Job cancelled, stopping scan");
-                break;
-            }
+        try {
+            job.addLog(JobLogEntry.Level.INFO, "Querying AEM for pages...");
+            List<Map<String, Object>> pages = aemClient.findPages(rootPath, maxPages);
 
-            List<String> issues = new ArrayList<>();
-
-            if (checks.contains("missing-title") && page.title == null) {
-                issues.add("Missing page title");
-            }
-            if (checks.contains("missing-description") && page.description == null) {
-                issues.add("Missing meta description");
-            }
-            if (checks.contains("broken-references") && page.hasBrokenRef) {
-                issues.add("Contains broken reference to: " + page.brokenRefPath);
-            }
-            if (checks.contains("stale-content") && page.daysSinceModified > staleDays) {
-                issues.add("Content is stale (last modified " + page.daysSinceModified + " days ago)");
-            }
-            if (checks.contains("missing-alt-text") && page.imageWithoutAlt) {
-                issues.add("Image missing alt text");
-            }
-            if (checks.contains("unpublished-changes") && page.hasUnpublishedChanges) {
-                issues.add("Has unpublished changes");
+            if (pages.isEmpty()) {
+                job.addLog(JobLogEntry.Level.WARN, "No pages found under: " + rootPath);
+                return;
             }
 
-            JobResult.ResultStatus status;
-            String message;
-
-            if (issues.isEmpty()) {
-                status = JobResult.ResultStatus.SUCCESS;
-                message = "No issues found";
-            } else {
-                status = JobResult.ResultStatus.ERROR;
-                message = String.join("; ", issues);
-            }
-
-            job.addResult(JobResult.builder()
-                    .path(page.path)
-                    .status(status)
-                    .message(message)
-                    .details(Map.of(
-                            "title", page.title != null ? page.title : "",
-                            "issues", issues,
-                            "lastModified", page.daysSinceModified + " days ago"
-                    ))
-                    .build());
-
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-
+            job.addLog(JobLogEntry.Level.INFO, "Found " + pages.size() + " pages to scan");
+            job.setTotalItems(pages.size());
             progressCallback.accept(job);
+
+            for (Map<String, Object> page : pages) {
+                if (job.getStatus() == JobStatus.CANCELLED) {
+                    job.addLog(JobLogEntry.Level.WARN, "Job cancelled, stopping scan");
+                    break;
+                }
+
+                String pagePath = (String) page.get("jcr:path");
+                if (pagePath == null) {
+                    pagePath = (String) page.get("path");
+                }
+
+                try {
+                    processPage(job, pagePath, page, checks, staleDays);
+                } catch (Exception e) {
+                    job.addResult(JobResult.builder()
+                            .path(pagePath)
+                            .status(JobResult.ResultStatus.ERROR)
+                            .message("Error scanning page: " + e.getMessage())
+                            .build());
+                }
+
+                progressCallback.accept(job);
+            }
+
+        } catch (Exception e) {
+            log.error("Failed to query AEM", e);
+            job.addLog(JobLogEntry.Level.ERROR, "Failed to query AEM: " + e.getMessage());
         }
 
         job.addLog(JobLogEntry.Level.INFO, String.format(
@@ -170,43 +150,110 @@ public class ContentHealthCheckTool implements AdminTool {
                 job.getTotalItems(), job.getErrorCount(), job.getSuccessCount()));
     }
 
-    private List<SimulatedPage> generateSimulatedContent(String rootPath) {
-        Random random = new Random(42);
-        List<SimulatedPage> pages = new ArrayList<>();
+    @SuppressWarnings("unchecked")
+    private void processPage(Job job, String pagePath, Map<String, Object> pageData,
+                            List<String> checks, int staleDays) throws Exception {
+        List<String> issues = new ArrayList<>();
 
-        String[] sections = {"en", "products", "services", "about", "blog", "contact"};
-        String[] pageNames = {"index", "overview", "details", "faq", "pricing", "team", "careers"};
+        // Get jcr:content properties
+        Map<String, Object> jcrContent = (Map<String, Object>) pageData.get("jcr:content");
+        if (jcrContent == null) {
+            // Try to fetch it directly
+            jcrContent = aemClient.getPageProperties(pagePath);
+        }
 
-        for (String section : sections) {
-            for (int i = 0; i < 3; i++) {
-                String pageName = pageNames[random.nextInt(pageNames.length)];
-                String path = rootPath + "/" + section + "/" + pageName + "-" + i;
+        if (jcrContent == null) {
+            issues.add("Missing jcr:content node");
+        } else {
+            // Check for missing title
+            if (checks.contains("missing-title")) {
+                String title = (String) jcrContent.get("jcr:title");
+                if (title == null || title.isBlank()) {
+                    issues.add("Missing page title (jcr:title)");
+                }
+            }
 
-                SimulatedPage page = new SimulatedPage();
-                page.path = path;
-                page.title = random.nextDouble() > 0.2 ? "Page: " + pageName : null;
-                page.description = random.nextDouble() > 0.3 ? "Description for " + pageName : null;
-                page.hasBrokenRef = random.nextDouble() > 0.85;
-                page.brokenRefPath = "/content/dam/missing-asset-" + random.nextInt(100) + ".jpg";
-                page.daysSinceModified = random.nextInt(200);
-                page.imageWithoutAlt = random.nextDouble() > 0.7;
-                page.hasUnpublishedChanges = random.nextDouble() > 0.6;
+            // Check for missing description
+            if (checks.contains("missing-description")) {
+                String description = (String) jcrContent.get("jcr:description");
+                if (description == null || description.isBlank()) {
+                    issues.add("Missing meta description (jcr:description)");
+                }
+            }
 
-                pages.add(page);
+            // Check for stale content
+            if (checks.contains("stale-content")) {
+                Object lastModObj = jcrContent.get("cq:lastModified");
+                if (lastModObj != null) {
+                    Instant lastModified = parseDate(lastModObj);
+                    if (lastModified != null) {
+                        long daysSinceMod = ChronoUnit.DAYS.between(lastModified, Instant.now());
+                        if (daysSinceMod > staleDays) {
+                            issues.add("Content is stale (last modified " + daysSinceMod + " days ago)");
+                        }
+                    }
+                }
+            }
+
+            // Check for unpublished changes
+            if (checks.contains("unpublished-changes")) {
+                Object lastModObj = jcrContent.get("cq:lastModified");
+                Object lastReplObj = jcrContent.get("cq:lastReplicated");
+
+                if (lastModObj != null && lastReplObj != null) {
+                    Instant lastMod = parseDate(lastModObj);
+                    Instant lastRepl = parseDate(lastReplObj);
+                    if (lastMod != null && lastRepl != null && lastMod.isAfter(lastRepl)) {
+                        issues.add("Has unpublished changes (modified after last publish)");
+                    }
+                } else if (lastModObj != null && lastReplObj == null) {
+                    issues.add("Page has never been published");
+                }
             }
         }
 
-        return pages;
+        // Determine result status
+        JobResult.ResultStatus status;
+        String message;
+
+        if (issues.isEmpty()) {
+            status = JobResult.ResultStatus.SUCCESS;
+            message = "No issues found";
+        } else {
+            status = JobResult.ResultStatus.ERROR;
+            message = String.join("; ", issues);
+        }
+
+        String title = jcrContent != null ? (String) jcrContent.get("jcr:title") : "";
+
+        job.addResult(JobResult.builder()
+                .path(pagePath)
+                .status(status)
+                .message(message)
+                .details(Map.of(
+                        "title", title != null ? title : "",
+                        "issues", issues,
+                        "checksRun", checks
+                ))
+                .build());
     }
 
-    private static class SimulatedPage {
-        String path;
-        String title;
-        String description;
-        boolean hasBrokenRef;
-        String brokenRefPath;
-        int daysSinceModified;
-        boolean imageWithoutAlt;
-        boolean hasUnpublishedChanges;
+    private Instant parseDate(Object dateObj) {
+        if (dateObj == null) {
+            return null;
+        }
+        try {
+            if (dateObj instanceof String dateStr) {
+                // Handle ISO format or AEM date format
+                if (dateStr.contains("T")) {
+                    return Instant.parse(dateStr.replace(" ", "T").replaceAll("\\+.*", "Z"));
+                }
+            } else if (dateObj instanceof Long timestamp) {
+                return Instant.ofEpochMilli(timestamp);
+            }
+        } catch (Exception e) {
+            log.debug("Could not parse date: {}", dateObj);
+        }
+        return null;
     }
 }
