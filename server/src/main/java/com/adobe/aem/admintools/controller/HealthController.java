@@ -13,7 +13,7 @@ public class HealthController {
 
     private final AemConfig aemConfig;
 
-    @GetMapping("/")
+    @GetMapping("/api/health")
     public Map<String, Object> health() {
         return Map.of(
                 "status", "ok",
