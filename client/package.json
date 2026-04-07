@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite --port 5174",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@spectrum-web-components/bundle": "^1.10.0",
@@ -14,7 +17,10 @@
     "lit": "^3.1.0"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^1.2.0",
+    "jsdom": "^24.0.0",
     "typescript": "^5.9.3",
-    "vite": "^5.0.0"
+    "vite": "^5.0.0",
+    "vitest": "^1.2.0"
   }
 }

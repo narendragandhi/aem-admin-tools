@@ -1,6 +1,6 @@
-# AEM Admin Tools
+# CXForge Admin Tools
 
-A modern, extensible admin tools platform for Adobe Experience Manager, inspired by ACS AEM Commons MCP tools.
+A modern, extensible admin tools platform for Adobe Experience Manager, inspired by ACS AEM Commons MCP tools. **CXForge** (Content Experience Forge) is your toolkit for crafting and managing AEM content at scale.
 
 Built with:
 - **Backend**: Spring Boot 3.2 + Java 21
@@ -13,6 +13,8 @@ Built with:
 - **Real-time Progress**: SSE streaming for live job updates
 - **Modern UI**: Adobe Spectrum design system
 - **Demo Mode**: Works without AEM connection for testing
+- **Security**: Configurable authentication, CORS, and security headers
+- **Docker Ready**: Non-root containers for production deployments
 
 ## Included Tools
 
@@ -55,12 +57,22 @@ npm run dev
 
 Open http://localhost:5174 in your browser.
 
+### Docker Compose
+
+```bash
+# Start full stack
+docker-compose --profile full up
+
+# Backend only
+docker-compose --profile backend up
+```
+
 ## Architecture
 
 ```
-aem-admin-tools/
+cxforge-admin-tools/
 ├── server/                      # Spring Boot backend
-│   └── src/main/java/com/adobe/aem/admintools/
+│   └── src/main/java/io/cxforge/admintools/
 │       ├── tool/               # Tool interface & implementations
 │       │   ├── AdminTool.java  # Base interface for all tools
 │       │   ├── ContentHealthCheckTool.java
@@ -72,6 +84,9 @@ aem-admin-tools/
 │       ├── controller/
 │       │   ├── ToolController.java # Tool discovery API
 │       │   └── JobController.java  # Job management API
+│       ├── config/             # Configuration classes
+│       │   ├── SecurityConfig.java # Auth & security headers
+│       │   └── WebConfig.java      # CORS configuration
 │       └── model/              # Data models
 │
 └── client/                     # Lit + Spectrum frontend
@@ -144,32 +159,74 @@ The tool is automatically registered via Spring's component scanning.
 
 ## Configuration
 
-Edit `server/src/main/resources/application.properties`:
+### Environment Variables
 
-```properties
-# Server port
-server.port=10004
+Copy `.env.example` to `.env` and configure:
 
-# AEM Connection (optional)
-aem.enabled=true
-aem.author.url=http://localhost:4502
-aem.username=admin
-aem.password=admin
-
-# Job settings
-jobs.max-concurrent=3
+```bash
+cp .env.example .env
 ```
+
+Key configuration options:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SERVER_PORT` | Backend server port | `10004` |
+| `AEM_ENABLED` | Enable AEM connection | `true` |
+| `AEM_AUTHOR_URL` | AEM author URL | `http://localhost:4502` |
+| `AEM_USERNAME` | AEM username | `admin` |
+| `AEM_PASSWORD` | AEM password | `admin` |
+| `SECURITY_ENABLED` | Enable authentication | `false` |
+| `SECURITY_ADMIN_PASSWORD` | Admin password (when security enabled) | `admin` |
+| `CORS_ALLOWED_ORIGINS` | Comma-separated allowed origins | `http://localhost:5174,http://localhost:8081` |
+| `LLM_PROVIDER` | AI provider (ollama/openai/anthropic) | `ollama` |
+| `LOG_LEVEL` | Application log level | `INFO` |
+
+### Production Security
+
+For production deployments, enable security:
+
+```bash
+export SECURITY_ENABLED=true
+export SECURITY_ADMIN_PASSWORD=<strong-password>
+export AEM_PASSWORD=<aem-password>
+export CORS_ALLOWED_ORIGINS=https://your-domain.com
+```
+
+Security features when enabled:
+- HTTP Basic Authentication
+- HSTS (Strict Transport Security)
+- Content Security Policy (CSP)
+- X-Frame-Options: DENY
+- Referrer Policy
+- Permissions Policy
+
+### API Documentation
+
+When running, access the Swagger UI at:
+- http://localhost:10004/swagger-ui.html
+- http://localhost:10004/v3/api-docs (OpenAPI spec)
+
+### Health & Metrics
+
+Spring Boot Actuator endpoints:
+- `/actuator/health` - Health check
+- `/actuator/info` - Application info
+- `/actuator/metrics` - Metrics
+- `/actuator/prometheus` - Prometheus metrics
 
 ## Comparison with ACS AEM Commons MCP
 
-| Feature | ACS MCP | AEM Admin Tools |
-|---------|---------|-----------------|
+| Feature | ACS MCP | CXForge |
+|---------|---------|---------|
 | Runs inside AEM | Yes | No (external) |
 | Real-time progress | Yes | Yes (SSE) |
 | Modern UI | No | Yes (Spectrum) |
 | Custom tools | Yes (Java) | Yes (Spring) |
 | Works without AEM | No | Yes (demo mode) |
 | AI enhancement | No | Planned |
+| Security headers | N/A | Yes |
+| Container ready | No | Yes |
 
 ## Future Enhancements
 
@@ -179,3 +236,14 @@ jobs.max-concurrent=3
 - [ ] Export results to CSV/JSON
 - [ ] Multi-user job management
 - [ ] Webhook notifications
+- [ ] OAuth2/OIDC authentication
+- [ ] Database persistence for job history
+- [ ] Rate limiting
+
+## License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+## Security
+
+For security issues, please see [SECURITY.md](SECURITY.md).

@@ -1,0 +1,100 @@
+version: '3.8'
+
+# CXForge Admin Tools Local Development Environment
+# Provides backend server, frontend dev server, and optional AEM mock
+
+services:
+  # Spring Boot Backend
+  backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: cxforge-backend
+    ports:
+      - "10004:10004"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - AEM_ENABLED=${AEM_ENABLED:-false}
+      - AEM_AUTHOR_URL=${AEM_AUTHOR_URL:-http://mock-aem:4502}
+      - AEM_USERNAME=${AEM_USERNAME:-admin}
+      - AEM_PASSWORD=${AEM_PASSWORD:-admin}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:5174,http://frontend:5174}
+      - SECURITY_ENABLED=${SECURITY_ENABLED:-false}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10004/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - cxforge-network
+    profiles:
+      - backend
+      - full
+
+  # Frontend Development Server
+  frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: cxforge-frontend
+    ports:
+      - "5174:5174"
+    environment:
+      - VITE_API_URL=http://backend:10004
+    volumes:
+      - ./client/src:/app/src:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - cxforge-network
+    profiles:
+      - frontend
+      - full
+
+  # Mock AEM Server for testing
+  mock-aem:
+    build:
+      context: ./docker/mock-aem
+      dockerfile: Dockerfile
+    container_name: cxforge-mock-aem
+    ports:
+      - "4502:4502"
+    environment:
+      - NODE_ENV=development
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:4502/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - cxforge-network
+    profiles:
+      - mock
+      - test
+      - full
+
+  # Run all tests
+  test:
+    build:
+      context: .
+      dockerfile: docker/test/Dockerfile
+    container_name: cxforge-test
+    environment:
+      - API_URL=http://backend:10004
+      - AEM_URL=http://mock-aem:4502
+    depends_on:
+      backend:
+        condition: service_healthy
+      mock-aem:
+        condition: service_healthy
+    networks:
+      - cxforge-network
+    profiles:
+      - test
+
+networks:
+  cxforge-network:
+    name: cxforge-network
+    driver: bridge

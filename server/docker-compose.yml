@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  admin-tools:
+    build: .
+    ports:
+      - "10004:10004"
+    environment:
+      # Security
+      SECURITY_ENABLED: "true"
+      SECURITY_ADMIN_PASSWORD: "${ADMIN_PASSWORD:-ChangeMe123!}"
+
+      # OAuth2 (optional - uncomment to enable)
+      # OAUTH2_ENABLED: "true"
+      # OAUTH2_ISSUER_URI: "https://keycloak.example.com/realms/myrealm"
+
+      # AEM Connection
+      AEM_AUTHOR_URL: "${AEM_AUTHOR_URL:-http://localhost:4502}"
+      AEM_PASSWORD: "${AEM_PASSWORD:-admin}"
+
+      # Database
+      DATABASE_URL: "jdbc:postgresql://postgres:5432/admintools"
+      DATABASE_USERNAME: "admintools"
+      DATABASE_PASSWORD: "${DB_PASSWORD:-admintools}"
+      DATABASE_DRIVER: "org.postgresql.Driver"
+
+      # Redis (for horizontal scaling)
+      REDIS_ENABLED: "true"
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+
+      # Multi-tenancy
+      MULTITENANCY_ENABLED: "false"
+
+      # Tracing (optional - uncomment to enable)
+      # TRACING_ENABLED: "true"
+      # OTLP_ENDPOINT: "http://jaeger:4318/v1/traces"
+
+      # LLM (optional)
+      LLM_ENABLED: "${LLM_ENABLED:-false}"
+      LLM_PROVIDER: "${LLM_PROVIDER:-ollama}"
+      LLM_OLLAMA_URL: "http://ollama:11434"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10004/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: admintools
+      POSTGRES_USER: admintools
+      POSTGRES_PASSWORD: "${DB_PASSWORD:-admintools}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admintools -d admintools"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+
+  # Optional: Jaeger for distributed tracing
+  # jaeger:
+  #   image: jaegertracing/all-in-one:latest
+  #   environment:
+  #     COLLECTOR_OTLP_ENABLED: "true"
+  #   ports:
+  #     - "16686:16686"  # UI
+  #     - "4318:4318"    # OTLP HTTP
+
+  # Optional: Local Ollama for LLM features
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   ports:
+  #     - "11434:11434"
+
+volumes:
+  postgres_data:
+  redis_data:
+  # ollama_data:
