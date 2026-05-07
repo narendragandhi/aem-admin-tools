@@ -52,7 +52,7 @@ Access the UI at http://localhost:5174
 ```
 aem-admin-tools/
 ├── server/                     # Spring Boot backend
-│   └── src/main/java/com/adobe/aem/admintools/
+│   └── src/main/java/io/cxforge/admintools/
 │       ├── tool/              # Tool implementations
 │       ├── service/           # Business logic
 │       ├── controller/        # REST endpoints

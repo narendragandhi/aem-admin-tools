@@ -181,7 +181,7 @@ export class AdminToolsApp extends LitElement {
         <div class="app-container">
           <div class="sidebar">
             <div class="sidebar-header">
-              <h1>AEM Admin Tools</h1>
+              <h1>CXForge Admin Tools</h1>
             </div>
             <div class="sidebar-content">
               <sp-sidenav @change=${(e: Event) => {
