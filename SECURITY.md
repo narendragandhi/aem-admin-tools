@@ -9,7 +9,7 @@
 
 ## Reporting a Vulnerability
 
-We take the security of AEM Admin Tools seriously. If you believe you have found a security vulnerability, please report it to us as described below.
+We take the security of CXForge Admin Tools seriously. If you believe you have found a security vulnerability, please report it to us as described below.
 
 ### Please Do
 

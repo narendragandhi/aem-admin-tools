@@ -1,4 +1,4 @@
-# AEM Admin Tools - Improvement Beads
+# CXForge Admin Tools - Improvement Beads
 
 This document breaks down all identified improvements into Steve Yegge's "beads" - small, independent, shippable units of work. Each bead can be completed in a focused session and delivers immediate value.
 

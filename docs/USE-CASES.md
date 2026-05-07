@@ -1,6 +1,6 @@
-# AEM Admin Tools Use Cases
+# CXForge Admin Tools Use Cases
 
-Practical examples of how to use AEM Admin Tools for common AEM administration tasks.
+Practical examples of how to use CXForge Admin Tools for common AEM administration tasks.
 
 ## Table of Contents
 
